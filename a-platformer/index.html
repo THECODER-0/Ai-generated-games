@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>2D Platformer (Custom Levels Only)</title>
+  <style>
+    body { margin: 0; background: #aaa; }
+    canvas { display: block; margin: auto; background: #aaa; }
+    #ui, #menu, #exportDialog, #importDialog {
+      position: absolute;
+      left: 0; top: 0;
+      width: 100vw; color: #222;
+      font-family: monospace;
+      pointer-events: none;
+      text-align: center;
+      font-size: 20px;
+      margin-top: 6px;
+      z-index: 100;
+    }
+    #menu, #exportDialog, #importDialog {
+      background: rgba(200,200,200,0.92);
+      pointer-events: auto;
+      top: 10vh; left: 50%; transform: translateX(-50%);
+      width: 420px; padding: 25px 35px; border-radius: 12px;
+      box-shadow: 0 8px 32px #3335;
+      color: #181818;
+      font-family: 'Arial', monospace;
+    }
+    #menu button, #exportDialog button, #importDialog button {
+      font-size: 18px; margin: 7px 0 7px 0; min-width: 180px; border-radius:6px; padding:7px 15px;
+      border: solid 1px #333; background: #eee; cursor: pointer;
+      font-family:'Arial Black',monospace;
+      outline:none;
+      transition:.13s;
+    }
+    #menu button:hover, #exportDialog button:hover, #importDialog button:hover { background:#333;color:#fff;}
+    #menu input, #importInput {
+      font-size: 16px; margin: 7px 0 7px 0; min-width: 150px;
+      border-radius:4px; padding:5px 10px; border: solid 1px #888;
+      font-family: 'Arial', monospace;
+    }
+    #exportJSON, #importInput {width:98%;height:96px;margin:6px 0;border-radius:7px;}
+    #closeMenu { position: absolute; right: 12px; top: 7px; font-size: 16px; background: #ccc; border-radius: 30px; height: 32px; width: 32px; border: none; cursor: pointer;}
+    #closeMenu:hover { background: #333; color: #fff;}
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="ui"></div>
+
+<!-- Menu Dialog-->
+<div id="menu" style="display:none;">
+  <button id="menuNewGame">New Game</button><br>
+  <button id="menuBuilder">Level Builder</button><br>
+  <span>Your Saved Levels:</span>
+  <div id="savedButtons"></div>
+  <button id="menuExport">Export Current Level</button>
+  <button id="menuImport">Import Level</button>
+  <span id="menuMsg" style="color:crimson;font-size:16px"></span>
+</div>
+
+<!-- Export Dialog -->
+<div id="exportDialog" style="display:none;">
+  <button id="closeExport" style="float:right;">×</button>
+  <h3>Export Level</h3>
+  <textarea id="exportJSON" readonly></textarea>
+  <button onclick="navigator.clipboard.writeText(document.getElementById('exportJSON').value)">Copy to Clipboard</button>
+</div>
+<!-- Import Dialog -->
+<div id="importDialog" style="display:none;">
+  <button id="closeImport" style="float:right;">×</button>
+  <h3>Import Level</h3>
+  <textarea id="importInput" placeholder="Paste level JSON here"></textarea>
+  <div>
+    <input id="importName" style="width:60%" placeholder="Optional: name for level">
+    <button id="importLoadBtn">Import</button>
+  </div>
+  <span id="importMsg" style="color:crimson;font-size:15px"></span>
+</div>
+
+<script>
+const W = 900, H = 600;
+const canvas = document.getElementById("gameCanvas");
+canvas.width = W; canvas.height = H;
+const ctx = canvas.getContext("2d");
+
+const ui = document.getElementById("ui");
+const menu = document.getElementById("menu");
+const exportDialog = document.getElementById("exportDialog");
+const importDialog = document.getElementById("importDialog");
+
+let invert = false;
+let builderMode = false;
+let inMenu = true;
+let keys = {};
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (!inMenu) {
+    if (e.code === "KeyI") invert = !invert;
+    if (e.code === "KeyB") builderMode = !builderMode;
+    if (e.code === "Escape") showMenu();
+  }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+class Level {
+  constructor() { this.reset(); }
+  reset() {
+    this.platforms = [];
+    this.builderTiles = {};
+    this.lastX = 0; this.checkpointX = 0;
+    // initial ground only
+    for (let i=0;i<10;i++){
+      this.platforms.push({x:i*TILE,y:H-80,w:TILE,h:TILE});
+      this.lastX = i*TILE + TILE;
+    }
+  }
+  cloneData() {
+    return {
+      platforms: JSON.parse(JSON.stringify(this.platforms)),
+      builderTiles: JSON.parse(JSON.stringify(this.builderTiles)),
+      lastX: this.lastX,
+      checkpointX: this.checkpointX
+    };
+  }
+  setData(d) {
+    this.platforms = d.platforms||[];
+    this.builderTiles = d.builderTiles||{};
+    this.lastX = d.lastX||0;
+    this.checkpointX = d.checkpointX||0;
+    if(!this.platforms.length) this.reset();
+  }
+  getPlatforms(camX) {
+    const v=[];
+    Object.keys(this.builderTiles).forEach(k=>{
+      if(this.builderTiles[k]) {
+        const [tx, ty] = k.split('_').map(Number);
+        v.push({
+          x: tx*TILE, y: ty*TILE, w:TILE, h:TILE, builder: true
+        });
+      }
+    });
+    for(const p of this.platforms){
+      if(p.x+p.w>camX-200 && p.x<camX+W+200)v.push(p);
+    }
+    return v;
+  }
+  toggleBuilderTile(tx,ty) {
+    const k=tx+"_"+ty;
+    this.builderTiles[k]=!this.builderTiles[k];
+    saveToLocal();
+  }
+  // generation removed
+  checkCheckpoint(px,py){
+    for(const p of this.platforms){
+      if(p.checkpoint&&
+        px>p.x-PLAYER_SIZE/2 && px<p.x+p.w+PLAYER_SIZE/2 &&
+        py>p.y-10 && py<p.y+p.h+10){
+          this.checkpointX=p.x;
+          return p.x;
+      }
+    }
+    return null;
+  }
+  getRespawnPos(){
+    if(this.checkpointX) return {x:this.checkpointX+20,y:H-200};
+    return {x:60,y:H-200};
+  }
+}
+const TILE=40;
+const GRAVITY=0.65;
+const JUMP_V=-13;
+const PLAYER_SIZE=36;
+const PLATFORM_HEIGHT=20;
+const PLATFORM_WIDTH=100;
+
+let level = new Level();
+
+class Player {
+  constructor() { this.respawn(); this.deathTimeout=0;}
+  respawn(){
+    const pos=level.getRespawnPos();
+    this.x=pos.x;this.y=pos.y;this.vx=0;this.vy=0;this.dead=false;
+  }
+  update(platforms){
+    if(this.dead){ this.deathTimeout--;
+      if(this.deathTimeout<=0)this.respawn();return;
+    }
+    let move=0;
+    if(keys["ArrowLeft"]||keys["KeyA"])move=-1;
+    if(keys["ArrowRight"]||keys["KeyD"])move=+1;
+    this.vx+=move*1.2;
+    if(!move)this.vx*=0.85;
+    if(Math.abs(this.vx)>7)this.vx=Math.sign(this.vx)*7;
+    this.vy+=GRAVITY;
+    if(this.vy>22)this.vy=22;
+    let onGround=false;
+    for(const p of platforms){
+      const hit=this.collides(p);
+      if(hit&&this.vy>0&&this.y+PLAYER_SIZE<=p.y+this.vy){
+        this.y=p.y-PLAYER_SIZE;this.vy=0;onGround=true;
+        if(p.checkpoint)level.checkCheckpoint(this.x,this.y);
+      }
+      if(hit&&this.vy<0&&this.y>p.y+p.h-PLAYER_SIZE){
+        this.y=p.y+p.h;this.vy=0.5;
+      }
+      if(hit){
+        if(this.x+PLAYER_SIZE>p.x&&
+          this.x<p.x+p.w&&
+          this.y+PLAYER_SIZE>p.y+2&&
+          this.y<p.y+p.h+2){
+          if(this.vx>0)this.x=p.x-PLAYER_SIZE;
+          if(this.vx<0)this.x=p.x+p.w;this.vx=0;
+        }
+      }
+    }
+    if((keys["ArrowUp"]||keys["Space"])&&onGround){
+      this.vy=JUMP_V;
+    }
+    this.x+=this.vx;
+    this.y+=this.vy;
+    if(this.y>H+120){
+      this.dead=true;this.deathTimeout=48;
+    }
+  }
+  collides(p){
+    return this.x+PLAYER_SIZE>p.x&&this.x<p.x+p.w&&
+           this.y+PLAYER_SIZE>p.y&&this.y<p.y+p.h;
+  }
+}
+let player = new Player();
+
+// Builder handler
+canvas.addEventListener("mousedown", (e)=>{
+  if (!builderMode || inMenu) return;
+  const rect=canvas.getBoundingClientRect();
+  const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  const worldX=mx+camX, worldY=my;
+  const tx=Math.floor(worldX/TILE),ty=Math.floor(worldY/TILE);
+  level.toggleBuilderTile(tx,ty);
+});
+
+let camX=0;
+
+function loop(){
+  if (inMenu) {
+    ctx.clearRect(0,0,W,H);
+    ui.innerHTML = "";
+    requestAnimationFrame(loop);
+    return;
+  }
+  const platforms=level.getPlatforms(camX);
+  player.update(platforms);
+  camX+=(player.x-W/2-camX)*0.11;
+  ctx.fillStyle = invert?"#eee":"#888";
+  ctx.fillRect(0,0,W,H);
+  ctx.save();
+  ctx.translate(-camX,0);
+  for(const p of platforms){
+    let c=invert?"#fff":"#000";
+    if(p.builder)c=invert?"#ccc":"#333";
+    if(p.checkpoint) c = invert ? "#ff0" : "#fc0";
+    ctx.fillStyle=c;
+    ctx.fillRect(p.x,p.y,p.w,p.h);
+    if(p.checkpoint){
+      ctx.strokeStyle=invert?"#333":"#fff";
+      ctx.lineWidth=3;
+      ctx.strokeRect(p.x+6,p.y+6,p.w-12,p.h-12);
+    }
+  }
+  // Builder hover
+  if(builderMode){
+    const mx=(window.mouseX??0)+camX,my=window.mouseY??0;
+    if(mx>camX&&mx<camX+W&&my>0&&my<H){
+      const tx=Math.floor(mx/TILE),ty=Math.floor(my/TILE);
+      ctx.strokeStyle=invert?"#666":"#fff";
+      ctx.lineWidth=2;
+      ctx.strokeRect(tx*TILE,ty*TILE,TILE,TILE);
+    }
+  }
+  // Player
+  ctx.fillStyle = invert ? "#000" : "#FFF";
+  ctx.beginPath();
+  ctx.rect(player.x,player.y,PLAYER_SIZE,PLAYER_SIZE);
+  ctx.fill();
+  ctx.strokeStyle=invert?"#fff":"#000";
+  ctx.lineWidth=2;
+  ctx.strokeRect(player.x,player.y,PLAYER_SIZE,PLAYER_SIZE);
+  ctx.restore();
+
+  ui.style.color = invert ? "#181818":"#333";
+  if (builderMode) {
+    ui.innerHTML = "BUILDER MODE &nbsp; Click to toggle tile &nbsp; I: Invert &nbsp; B: Exit &nbsp; ESC: Menu";
+  } else {
+    ui.innerHTML = "←/→ Move &nbsp; ↑/SPACE Jump &nbsp; B: Builder &nbsp; I: Invert &nbsp; ESC: Menu";
+  }
+  if(player.dead){
+    ctx.fillStyle=invert?"#fff8":"#0008";
+    ctx.fillRect(0,0,W,H);
+    ctx.font="bold 40px Arial";
+    ctx.fillStyle=invert?"#333":"#fff";
+    ctx.textAlign="center";
+    ctx.fillText("You Died!",W/2,H/2-20);
+    ctx.font="bold 24px Arial";
+    ctx.fillText("Respawning...",W/2,H/2+30);
+  }
+  requestAnimationFrame(loop);
+}
+canvas.addEventListener('mousemove',e=>{
+  const rect=canvas.getBoundingClientRect();
+  window.mouseX=e.clientX-rect.left;window.mouseY=e.clientY-rect.top;
+});
+
+loop();
+
+// ---------- Menu & Level Saving/Loading/Import/Export --------------
+function showMenu(msg="") {
+  inMenu = true; menu.style.display = "block";
+  ui.innerHTML = "";
+  document.getElementById("menuMsg").textContent = msg || "";
+  refreshSavedLevels();
+  if(!document.activeElement) menu.focus();
+}
+function hideMenu() { inMenu = false; menu.style.display = "none"; }
+function saveToLocal() {
+  if (activeLevelName) localStorage.setItem("pl_save_"+activeLevelName, JSON.stringify(level.cloneData()));
+}
+function loadFromLocal(levelName) {
+  const raw = localStorage.getItem("pl_save_"+levelName);
+  if (!raw) return false;
+  try {
+    level.setData(JSON.parse(raw));
+    activeLevelName = levelName;
+    resetPlayer();
+    showMenu(`Loaded saved level "${levelName}"!`);
+    return true;
+  } catch(e) { showMenu("Can't load: " + e); return false; }
+}
+function saveAs(name) {
+  activeLevelName = name;
+  localStorage.setItem("pl_save_"+name, JSON.stringify(level.cloneData()));
+  showMenu(`Level saved with name "${name}"!`);
+}
+function resetPlayer() { player = new Player(); camX = 0; }
+
+let activeLevelName = null;
+
+document.getElementById("menuNewGame").onclick = function(){
+  level = new Level(); activeLevelName = null; resetPlayer(); builderMode = false; hideMenu();
+};
+document.getElementById("menuBuilder").onclick = function(){
+  builderMode = true; hideMenu();
+};
+function refreshSavedLevels() {
+  const saved = [];
+  for(let k in localStorage) {
+    if (k.startsWith("pl_save_")) saved.push(k.substring(8));
+  }
+  const out = [];
+  saved.forEach(name=>{
+    out.push(`<button onclick="loadFromLocal('${name}');hideMenu();">Load "${name}"</button>
+     <button onclick="deleteSavedLevel('${name}');showMenu('Deleted level &quot;${name}&quot;.');" style="font-size:14px;color:#d00;background:#fee;border:solid 1px #d00">Delete</button>`);
+  });
+  document.getElementById("savedButtons").innerHTML = out.length?out.join("<br>"): "<em>None yet.</em>";
+}
+function deleteSavedLevel(name){
+  localStorage.removeItem("pl_save_"+name);
+  refreshSavedLevels();
+}
+
+// Export dialog
+document.getElementById("menuExport").onclick = function(){
+  exportDialog.style.display = "block";
+  document.getElementById("exportJSON").value = JSON.stringify(level.cloneData(),null,2);
+};
+document.getElementById("closeExport").onclick = function() {
+  exportDialog.style.display = "none";
+};
+// Import dialog
+document.getElementById("menuImport").onclick = function(){
+  importDialog.style.display = "block";
+  document.getElementById("importInput").value = "";
+  document.getElementById("importName").value = "";
+  document.getElementById("importMsg").textContent = "";
+};
+document.getElementById("closeImport").onclick = function() {
+  importDialog.style.display = "none";
+};
+document.getElementById("importLoadBtn").onclick = function(){
+  const json = document.getElementById("importInput").value.trim();
+  const name = document.getElementById("importName").value.trim() || "Imported"+(""+Math.random()).slice(-5);
+  try{
+    const data = JSON.parse(json);
+    level.setData(data);
+    activeLevelName = null;
+    resetPlayer(); builderMode = false;
+    if(name) saveAs(name);
+    importDialog.style.display = "none";
+    hideMenu();
+  }catch(err){
+    document.getElementById("importMsg").textContent = "Import error: "+err;
+  }
+};
+// Hide dialogs on Esc
+document.addEventListener("keydown",e=>{
+  if(e.code==="Escape") {
+    if (exportDialog.style.display !== "none") {exportDialog.style.display = "none";}
+    if (importDialog.style.display !== "none") {importDialog.style.display = "none";}
+  }
+});
+
+// Start up with menu only
+showMenu();
+document.getElementById("closeMenu")?.addEventListener("click",()=>hideMenu());
+document.body.addEventListener("keydown",e=>{
+  if (inMenu && (e.code==="Space"||e.code==="Enter")) hideMenu();
+});
+</script>
+</body>
+</html>
