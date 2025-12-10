@@ -1,32 +1,70 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Backrooms Maze Builder</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <title>Backrooms Maze Builder — Editor + 3D Explorer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <header>
     <h1>Backrooms Maze Builder</h1>
-    <div id="controls">
-        <label for="maze-size">Maze Size:</label>
-        <select id="maze-size">
-            <option value="10">10 x 10</option>
-            <option value="20">20 x 20</option>
-            <option value="30">30 x 30</option>
-            <option value="40">40 x 40</option>
-        </select>
-        <button id="generate-maze">Generate Maze</button>
-        <button id="export-maze">Export Maze (JSON)</button>
-        <input type="file" id="import-maze" style="display:none;">
-        <button id="import-maze-btn">Import Maze (JSON)</button>
-        <button id="view-3d">View in 3D</button>
+    <p class="hint">Editor: click & drag to paint. 3D: click the 3D view to lock the pointer, use WASD to move and mouse to look.</p>
+  </header>
+
+  <section id="controls">
+    <div class="row">
+      <label for="maze-size">Maze Size:</label>
+      <select id="maze-size">
+        <option value="10">10 × 10</option>
+        <option value="16">16 × 16</option>
+        <option value="24">24 × 24</option>
+        <option value="32">32 × 32</option>
+      </select>
+
+      <button id="generate-maze">Generate</button>
+      <button id="clear-maze">Clear</button>
     </div>
-    <div id="maze-container"></div>
-    <div id="three-container" style="display:none;">
-        <button id="close-3d">Back to Editor</button>
-        <div id="threejs-canvas"></div>
+
+    <div class="row">
+      <label>Edit:</label>
+      <button id="tool-wall" class="tool active">Paint Wall</button>
+      <button id="tool-empty" class="tool">Paint Empty</button>
+      <button id="tool-rect" class="tool">Rectangle</button>
+      <button id="tool-start" class="tool">Set Start</button>
+      <button id="tool-end" class="tool">Set End</button>
     </div>
-    <script src="maze.js"></script>
-    <script src="backrooms3d.js"></script>
+
+    <div class="row">
+      <button id="export-maze">Export JSON</button>
+      <input id="import-maze" type="file" accept=".json" style="display:none" />
+      <button id="import-maze-btn">Import JSON</button>
+
+      <button id="view-3d">Enter 3D (Explore)</button>
+    </div>
+  </section>
+
+  <main>
+    <div id="editor">
+      <div id="maze-container" tabindex="0" aria-label="Maze editor grid"></div>
+    </div>
+
+    <div id="three-container" class="hidden">
+      <div class="three-topbar">
+        <div class="three-buttons">
+          <button id="exit-3d">Exit 3D</button>
+          <span class="three-status">Click the view to lock pointer — WASD to move</span>
+        </div>
+      </div>
+      <div id="threejs-canvas"></div>
+    </div>
+  </main>
+
+  <footer>
+    <small>Procedural wall/floor textures, pointer-lock first-person movement, and editor tools included.</small>
+  </footer>
+
+  <script src="maze.js"></script>
+  <script src="backrooms3d.js"></script>
 </body>
 </html>
