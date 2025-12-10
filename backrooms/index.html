@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Backrooms Maze Builder</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Backrooms Maze Builder</h1>
+    <div id="controls">
+        <label for="maze-size">Maze Size:</label>
+        <select id="maze-size">
+            <option value="10">10 x 10</option>
+            <option value="20">20 x 20</option>
+            <option value="30">30 x 30</option>
+            <option value="40">40 x 40</option>
+        </select>
+        <button id="generate-maze">Generate Maze</button>
+        <button id="export-maze">Export Maze (JSON)</button>
+        <input type="file" id="import-maze" style="display:none;">
+        <button id="import-maze-btn">Import Maze (JSON)</button>
+        <button id="view-3d">View in 3D</button>
+    </div>
+    <div id="maze-container"></div>
+    <div id="three-container" style="display:none;">
+        <button id="close-3d">Back to Editor</button>
+        <div id="threejs-canvas"></div>
+    </div>
+    <script src="maze.js"></script>
+    <script src="backrooms3d.js"></script>
+</body>
+</html>
