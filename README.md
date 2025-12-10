@@ -1,1 +1,2 @@
 # Ai-generated-games
+## THIS IS AI SO DON'T TELL ME TO FIX SOMETHING OR THINK I CAN'T CODE.
