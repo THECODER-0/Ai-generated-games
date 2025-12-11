@@ -1,421 +1,981 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <title>2D Platformer (Custom Levels Only)</title>
+  <meta charset="utf-8" />
+  <title>Infinite-Up Platformer (iPad-friendly) — Builder & Import/Export</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no" />
+
   <style>
-    body { margin: 0; background: #aaa; }
-    canvas { display: block; margin: auto; background: #aaa; }
-    #ui, #menu, #exportDialog, #importDialog {
-      position: absolute;
-      left: 0; top: 0;
-      width: 100vw; color: #222;
-      font-family: monospace;
-      pointer-events: none;
-      text-align: center;
-      font-size: 20px;
-      margin-top: 6px;
-      z-index: 100;
+    /* Basic layout */
+    :root { --ui-bg: rgba(240,240,240,0.95); --dark: #111; --light: #fff; --accent: #333; }
+    html,body { height:100%; margin:0; background:#aaa; -webkit-user-select:none; -ms-user-select:none; user-select:none; }
+    canvas { display:block; margin:0 auto; background:#aaa; touch-action:none; }
+    #ui { position:fixed; left:0; right:0; top:6px; text-align:center; font-family:monospace; z-index:120; pointer-events:none; color:var(--dark); font-size:16px; }
+    /* Menu/dialog styles (pointer-events:auto needed to interact) */
+    .dialog {
+      position:fixed; left:50%; top:8vh; transform:translateX(-50%);
+      width:92%; max-width:520px; background:var(--ui-bg); color:var(--dark);
+      padding:16px 18px; border-radius:10px; box-shadow:0 8px 32px rgba(0,0,0,0.25);
+      z-index:200; font-family:Arial,monospace; pointer-events:auto;
     }
-    #menu, #exportDialog, #importDialog {
-      background: rgba(200,200,200,0.92);
-      pointer-events: auto;
-      top: 10vh; left: 50%; transform: translateX(-50%);
-      width: 420px; padding: 25px 35px; border-radius: 12px;
-      box-shadow: 0 8px 32px #3335;
-      color: #181818;
-      font-family: 'Arial', monospace;
+    .dialog h2 { margin:0 0 10px 0; font-size:18px; }
+    .dialog button, .dialog input, .dialog textarea { font-family:monospace; font-size:15px; }
+    .btn { display:inline-block; padding:8px 12px; margin:6px 6px 6px 0; border-radius:8px; border:1px solid #444; background:#efefef; cursor:pointer; }
+    .btn.danger { background:#fdd; border-color:#d33; color:#600; }
+    .btn:active { transform:translateY(1px); }
+    textarea { width:100%; height:120px; margin-top:8px; box-sizing:border-box; }
+    input[type=text] { width:64%; padding:6px; margin-right:8px; }
+
+    /* Touch controls for iPad/mobile */
+    #touchControls {
+      position:fixed; bottom:16px; left:16px; right:16px; z-index:150; pointer-events:auto;
+      display:flex; justify-content:space-between; align-items:flex-end;
     }
-    #menu button, #exportDialog button, #importDialog button {
-      font-size: 18px; margin: 7px 0 7px 0; min-width: 180px; border-radius:6px; padding:7px 15px;
-      border: solid 1px #333; background: #eee; cursor: pointer;
-      font-family:'Arial Black',monospace;
-      outline:none;
-      transition:.13s;
+    .dpad { display:flex; gap:10px; align-items:center; }
+    .touchBtn {
+      width:76px; height:76px; border-radius:14px; background:rgba(255,255,255,0.92);
+      display:flex; align-items:center; justify-content:center; font-size:20px; border:1px solid #555;
+      box-shadow:0 6px 18px rgba(0,0,0,0.18);
+      -webkit-tap-highlight-color: transparent;
+      user-select:none;
     }
-    #menu button:hover, #exportDialog button:hover, #importDialog button:hover { background:#333;color:#fff;}
-    #menu input, #importInput {
-      font-size: 16px; margin: 7px 0 7px 0; min-width: 150px;
-      border-radius:4px; padding:5px 10px; border: solid 1px #888;
-      font-family: 'Arial', monospace;
+    .touchBtn.small { width:64px; height:64px; border-radius:12px; font-size:18px; }
+    .touchHint { font-size:12px; opacity:0.9; margin-top:6px; text-align:center; color:#222; }
+
+    /* Small-screen adjustments */
+    @media (max-width:520px) {
+      .touchBtn { width:64px; height:64px; }
+      .touchBtn.small { width:56px; height:56px; }
     }
-    #exportJSON, #importInput {width:98%;height:96px;margin:6px 0;border-radius:7px;}
-    #closeMenu { position: absolute; right: 12px; top: 7px; font-size: 16px; background: #ccc; border-radius: 30px; height: 32px; width: 32px; border: none; cursor: pointer;}
-    #closeMenu:hover { background: #333; color: #fff;}
   </style>
 </head>
 <body>
-<canvas id="gameCanvas"></canvas>
-<div id="ui"></div>
+  <!-- Canvas -->
+  <canvas id="gameCanvas" width="900" height="600"></canvas>
 
-<!-- Menu Dialog-->
-<div id="menu" style="display:none;">
-  <button id="menuNewGame">New Game</button><br>
-  <button id="menuBuilder">Level Builder</button><br>
-  <span>Your Saved Levels:</span>
-  <div id="savedButtons"></div>
-  <button id="menuExport">Export Current Level</button>
-  <button id="menuImport">Import Level</button>
-  <span id="menuMsg" style="color:crimson;font-size:16px"></span>
-</div>
+  <!-- Top UI text -->
+  <div id="ui">←/→ Move  •  ↑/Space Jump  •  B: Builder  •  I: Invert  •  ESC: Menu</div>
 
-<!-- Export Dialog -->
-<div id="exportDialog" style="display:none;">
-  <button id="closeExport" style="float:right;">×</button>
-  <h3>Export Level</h3>
-  <textarea id="exportJSON" readonly></textarea>
-  <button onclick="navigator.clipboard.writeText(document.getElementById('exportJSON').value)">Copy to Clipboard</button>
-</div>
-<!-- Import Dialog -->
-<div id="importDialog" style="display:none;">
-  <button id="closeImport" style="float:right;">×</button>
-  <h3>Import Level</h3>
-  <textarea id="importInput" placeholder="Paste level JSON here"></textarea>
-  <div>
-    <input id="importName" style="width:60%" placeholder="Optional: name for level">
-    <button id="importLoadBtn">Import</button>
+  <!-- Menu (shows first) -->
+  <div id="menu" class="dialog" style="display:none;">
+    <h2>Platformer — Menu</h2>
+    <div>
+      <button id="menuNew" class="btn">New Blank Level</button>
+      <button id="menuPlay" class="btn">Play Current Level</button>
+      <button id="menuBuilder" class="btn">Open Builder</button>
+      <button id="menuSave" class="btn">Save Level</button>
+      <button id="menuExport" class="btn">Export (JSON)</button>
+      <button id="menuImportOpen" class="btn">Import (Paste JSON)</button>
+    </div>
+
+    <hr />
+
+    <div style="text-align:left;">
+      <div style="margin-bottom:8px;"><strong>Saved levels (localStorage):</strong></div>
+      <div id="savedList"></div>
+      <div style="margin-top:8px;">
+        <input id="saveName" type="text" placeholder="Save name (e.g. my-level)" />
+        <button id="saveAsBtn" class="btn">Save As</button>
+      </div>
+    </div>
+
+    <hr />
+
+    <div style="text-align:left;">
+      <div style="margin-bottom:8px;"><strong>Remote JSON files in this folder (auto-detected):</strong></div>
+      <div id="remoteList">Scanning folder for .json files... <span id="remoteStatus"></span></div>
+      <div style="margin-top:8px;">
+        <button id="remoteRescan" class="btn">Rescan Folder</button>
+      </div>
+      <div style="margin-top:10px; font-size:13px; color:#444;">
+        Note: detection works if the server returns an HTML directory listing with links to .json files,
+        or if the JSON files are directly addressable. Private servers may block directory listings.
+      </div>
+    </div>
+
+    <div style="margin-top:12px; text-align:right;">
+      <button id="menuClose" class="btn">Close</button>
+    </div>
   </div>
-  <span id="importMsg" style="color:crimson;font-size:15px"></span>
-</div>
 
-<script>
-const W = 900, H = 600;
-const canvas = document.getElementById("gameCanvas");
-canvas.width = W; canvas.height = H;
-const ctx = canvas.getContext("2d");
+  <!-- Export dialog -->
+  <div id="exportDialog" class="dialog" style="display:none;">
+    <h2>Export Current Level (JSON)</h2>
+    <textarea id="exportArea" readonly></textarea>
+    <div style="text-align:right; margin-top:8px;">
+      <button id="exportCopy" class="btn">Copy</button>
+      <button id="exportClose" class="btn">Close</button>
+    </div>
+  </div>
 
-const ui = document.getElementById("ui");
-const menu = document.getElementById("menu");
-const exportDialog = document.getElementById("exportDialog");
-const importDialog = document.getElementById("importDialog");
+  <!-- Import dialog -->
+  <div id="importDialog" class="dialog" style="display:none;">
+    <h2>Import Level (paste JSON)</h2>
+    <textarea id="importArea" placeholder="Paste level JSON here"></textarea>
+    <div style="margin-top:8px;">
+      <input id="importName" type="text" placeholder="Optional: name to save as" />
+      <button id="importLoad" class="btn">Import & Play</button>
+      <button id="importClose" class="btn">Close</button>
+    </div>
+    <div id="importMsg" style="color:#b00; margin-top:8px;"></div>
+  </div>
 
-let invert = false;
-let builderMode = false;
-let inMenu = true;
-let keys = {};
+  <!-- Touch controls (iPad / mobile) -->
+  <div id="touchControls" style="display:none; pointer-events:auto;">
+    <div class="dpad" id="leftControls">
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div id="leftBtn" class="touchBtn">&#8592;</div>
+        <div class="touchHint">Left</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div id="rightBtn" class="touchBtn">&#8594;</div>
+        <div class="touchHint">Right</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;">
+      <div id="jumpBtn" class="touchBtn small">&#9650;</div>
+      <div class="touchHint">Jump</div>
+    </div>
+  </div>
 
-document.addEventListener('keydown', e => {
-  keys[e.code] = true;
-  if (!inMenu) {
-    if (e.code === "KeyI") invert = !invert;
-    if (e.code === "KeyB") builderMode = !builderMode;
-    if (e.code === "Escape") showMenu();
+  <script>
+  /******************************************************************
+   * Infinite-Up Platformer with Builder, Import/Export, iPad touch
+   * - Comments are included throughout to explain structure & behavior
+   * - Key features:
+   *   * Infinite procedural generation (chunk-based) so player may go up forever
+   *   * Builder mode with localStorage saves/autosave
+   *   * Menu appears first; saved levels in localStorage appear in menu
+   *   * Attempts to detect .json files in hosting folder by fetching directory HTML
+   *   * iPad-friendly touch controls; layout scales for small screens
+   ******************************************************************/
+
+  // Canvas and sizing
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // We'll adapt canvas size to fit the window while keeping a base virtual size.
+  const BASE_W = 900, BASE_H = 600;
+  function resizeCanvas() {
+    // Fit horizontally, allow scaling to device width/height
+    const maxW = Math.min(window.innerWidth, 1400);
+    const maxH = Math.min(window.innerHeight, 1000);
+    // Maintain aspect ratio roughly based on BASE_W/BASE_H
+    let scale = Math.min(maxW / BASE_W, maxH / BASE_H);
+    if (scale < 0.6) scale = 0.6;
+    canvas.style.width = Math.round(BASE_W * scale) + 'px';
+    canvas.style.height = Math.round(BASE_H * scale) + 'px';
+    // Keep internal drawing resolution constant for physics/logic
+    canvas.width = BASE_W;
+    canvas.height = BASE_H;
   }
-});
-document.addEventListener('keyup', e => { keys[e.code] = false; });
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
 
-class Level {
-  constructor() { this.reset(); }
-  reset() {
-    this.platforms = [];
-    this.builderTiles = {};
-    this.lastX = 0; this.checkpointX = 0;
-    // initial ground only
-    for (let i=0;i<10;i++){
-      this.platforms.push({x:i*TILE,y:H-80,w:TILE,h:TILE});
-      this.lastX = i*TILE + TILE;
-    }
-  }
-  cloneData() {
-    return {
-      platforms: JSON.parse(JSON.stringify(this.platforms)),
-      builderTiles: JSON.parse(JSON.stringify(this.builderTiles)),
-      lastX: this.lastX,
-      checkpointX: this.checkpointX
+  // Game constants
+  const TILE = 40;
+  const PLAYER_SIZE = 36;
+  const GRAVITY = 0.72;
+  const JUMP_V = -14;
+  const MAX_FALL = 26;
+
+  // Chunk generation constants
+  const CHUNK_W = 800;   // width of a chunk in world px
+  const CHUNK_H = 600;   // height of a chunk in world px
+  const CHUNK_RADIUS = 2; // generate chunks in radius around camera (both axes)
+
+  // State flags
+  let invert = false;
+  let builderMode = false;
+  let inMenu = true;
+
+  // Camera will follow player in both X and Y (allows infinite up)
+  let camX = 0;
+  let camY = 0;
+
+  // Input state
+  const keys = {};
+  let touchState = { left: false, right: false, jump: false };
+
+  // Utility: simple deterministic PRNG per chunk (so generated chunks are stable)
+  function mulberry32(a) {
+    return function() {
+      let t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
     };
   }
-  setData(d) {
-    this.platforms = d.platforms||[];
-    this.builderTiles = d.builderTiles||{};
-    this.lastX = d.lastX||0;
-    this.checkpointX = d.checkpointX||0;
-    if(!this.platforms.length) this.reset();
-  }
-  getPlatforms(camX) {
-    const v=[];
-    Object.keys(this.builderTiles).forEach(k=>{
-      if(this.builderTiles[k]) {
-        const [tx, ty] = k.split('_').map(Number);
-        v.push({
-          x: tx*TILE, y: ty*TILE, w:TILE, h:TILE, builder: true
-        });
-      }
-    });
-    for(const p of this.platforms){
-      if(p.x+p.w>camX-200 && p.x<camX+W+200)v.push(p);
-    }
-    return v;
-  }
-  toggleBuilderTile(tx,ty) {
-    const k=tx+"_"+ty;
-    this.builderTiles[k]=!this.builderTiles[k];
-    saveToLocal();
-  }
-  // generation removed
-  checkCheckpoint(px,py){
-    for(const p of this.platforms){
-      if(p.checkpoint&&
-        px>p.x-PLAYER_SIZE/2 && px<p.x+p.w+PLAYER_SIZE/2 &&
-        py>p.y-10 && py<p.y+p.h+10){
-          this.checkpointX=p.x;
-          return p.x;
-      }
-    }
-    return null;
-  }
-  getRespawnPos(){
-    if(this.checkpointX) return {x:this.checkpointX+20,y:H-200};
-    return {x:60,y:H-200};
-  }
-}
-const TILE=40;
-const GRAVITY=0.65;
-const JUMP_V=-13;
-const PLAYER_SIZE=36;
-const PLATFORM_HEIGHT=20;
-const PLATFORM_WIDTH=100;
 
-let level = new Level();
-
-class Player {
-  constructor() { this.respawn(); this.deathTimeout=0;}
-  respawn(){
-    const pos=level.getRespawnPos();
-    this.x=pos.x;this.y=pos.y;this.vx=0;this.vy=0;this.dead=false;
-  }
-  update(platforms){
-    if(this.dead){ this.deathTimeout--;
-      if(this.deathTimeout<=0)this.respawn();return;
+  /****************
+   * Level object
+   *
+   * - supports:
+   *   - staticPlatforms: platforms explicitly saved in level data (manually added)
+   *   - builderTiles: toggled grid tiles (saved/loaded)
+   *   - generatedChunks: procedural chunks (not saved)
+   ****************/
+  class Level {
+    constructor() {
+      this.staticPlatforms = [];   // saved rectangles: {x,y,w,h,checkpoint?}
+      this.builderTiles = {};      // key "tx_ty" -> true
+      this.generatedChunks = {};   // key "cx_cy" -> [platforms...] (not saved)
+      this.checkpointX = 0;
+      this.resetToBlank();
     }
-    let move=0;
-    if(keys["ArrowLeft"]||keys["KeyA"])move=-1;
-    if(keys["ArrowRight"]||keys["KeyD"])move=+1;
-    this.vx+=move*1.2;
-    if(!move)this.vx*=0.85;
-    if(Math.abs(this.vx)>7)this.vx=Math.sign(this.vx)*7;
-    this.vy+=GRAVITY;
-    if(this.vy>22)this.vy=22;
-    let onGround=false;
-    for(const p of platforms){
-      const hit=this.collides(p);
-      if(hit&&this.vy>0&&this.y+PLAYER_SIZE<=p.y+this.vy){
-        this.y=p.y-PLAYER_SIZE;this.vy=0;onGround=true;
-        if(p.checkpoint)level.checkCheckpoint(this.x,this.y);
+
+    // Reset level to blank ground (starter)
+    resetToBlank() {
+      this.staticPlatforms = [];
+      this.builderTiles = {};
+      this.generatedChunks = {};
+      this.checkpointX = 0;
+      // Add a starting ground strip centered around x=0
+      for (let i = -6; i <= 6; i++) {
+        this.staticPlatforms.push({ x: i * TILE, y: BASE_H - 80, w: TILE, h: TILE });
       }
-      if(hit&&this.vy<0&&this.y>p.y+p.h-PLAYER_SIZE){
-        this.y=p.y+p.h;this.vy=0.5;
-      }
-      if(hit){
-        if(this.x+PLAYER_SIZE>p.x&&
-          this.x<p.x+p.w&&
-          this.y+PLAYER_SIZE>p.y+2&&
-          this.y<p.y+p.h+2){
-          if(this.vx>0)this.x=p.x-PLAYER_SIZE;
-          if(this.vx<0)this.x=p.x+p.w;this.vx=0;
+    }
+
+    // Toggle a builder grid tile (tx,ty are tile coords)
+    toggleBuilderTile(tx, ty) {
+      const k = tx + '_' + ty;
+      this.builderTiles[k] = !this.builderTiles[k];
+      // Autosave builder edits to local storage (under a working autosave key)
+      autosaveCurrentLevel();
+    }
+
+    // Return visible platforms (static + builder tiles + generated chunk platforms)
+    getPlatforms(viewX, viewY) {
+      const vis = [];
+      // static platforms
+      for (const p of this.staticPlatforms) vis.push(p);
+      // builder tiles
+      for (const k in this.builderTiles) {
+        if (this.builderTiles[k]) {
+          const [tx, ty] = k.split('_').map(Number);
+          vis.push({ x: tx * TILE, y: ty * TILE, w: TILE, h: TILE, builder: true });
         }
       }
+      // generated chunks near camera
+      const cxCenter = Math.floor(viewX / CHUNK_W);
+      const cyCenter = Math.floor(viewY / CHUNK_H);
+      for (let cx = cxCenter - CHUNK_RADIUS; cx <= cxCenter + CHUNK_RADIUS; cx++) {
+        for (let cy = cyCenter - CHUNK_RADIUS; cy <= cyCenter + CHUNK_RADIUS; cy++) {
+          const key = cx + '_' + cy;
+          if (!this.generatedChunks[key]) {
+            this.generatedChunks[key] = this._generateChunk(cx, cy);
+          }
+          for (const p of this.generatedChunks[key]) vis.push(p);
+        }
+      }
+      return vis;
     }
-    if((keys["ArrowUp"]||keys["Space"])&&onGround){
-      this.vy=JUMP_V;
+
+    // Procedurally generate a chunk for coordinates (cx,cy).
+    // Uses deterministic PRNG seeded from cx,cy so chunks stay the same.
+    _generateChunk(cx, cy) {
+      const seed = (cx * 73856093) ^ (cy * 19349663);
+      const rng = mulberry32(seed >>> 0);
+      const ox = cx * CHUNK_W;
+      const oy = cy * CHUNK_H;
+      const plats = [];
+
+      // Decide how many platforms to place in this chunk
+      const count = 4 + Math.floor(rng() * 6);
+      for (let i = 0; i < count; i++) {
+        // platform width randomized
+        const w = TILE * (1 + Math.floor(rng() * 4)); // 40,80,120,160
+        // position inside chunk
+        const x = Math.floor(ox + rng() * (CHUNK_W - w - 8));
+        // generate platforms all over vertical range so vertical traversal possible
+        const y = Math.floor(oy + rng() * (CHUNK_H - 24));
+        // small probability to create a checkpoint platform marker
+        const checkpoint = rng() < 0.03;
+        plats.push({ x: x, y: y, w: w, h: 18, checkpoint: checkpoint });
+      }
+      // Add occasional vertical pillar for interesting traversal
+      if (rng() < 0.08) {
+        const col = Math.floor(rng() * 4);
+        const x = ox + col * (TILE * 3) + 10;
+        for (let j = 0; j < 6; j++) {
+          plats.push({ x: x, y: oy + j * 40 + 40, w: TILE - 4, h: TILE - 4 });
+        }
+      }
+      return plats;
     }
-    this.x+=this.vx;
-    this.y+=this.vy;
-    if(this.y>H+120){
-      this.dead=true;this.deathTimeout=48;
+
+    // Export only the editable parts (staticPlatforms + builderTiles + checkpointX)
+    exportData() {
+      return {
+        staticPlatforms: JSON.parse(JSON.stringify(this.staticPlatforms)),
+        builderTiles: JSON.parse(JSON.stringify(this.builderTiles)),
+        checkpointX: this.checkpointX
+      };
+    }
+
+    // Load data (from import or saved localStorage)
+    importData(d) {
+      this.staticPlatforms = d.staticPlatforms || [];
+      this.builderTiles = d.builderTiles || {};
+      this.checkpointX = d.checkpointX || 0;
+      this.generatedChunks = {}; // clear generated chunks so new world uses new base
+    }
+
+    // Check for checkpoint overlaps
+    checkCheckpoint(px, py) {
+      // static
+      for (const p of this.staticPlatforms) {
+        if (p.checkpoint &&
+          px > p.x - PLAYER_SIZE / 2 && px < p.x + p.w + PLAYER_SIZE / 2 &&
+          py > p.y - 10 && py < p.y + p.h + 10) {
+          this.checkpointX = p.x;
+          return true;
+        }
+      }
+      // generated chunks (some generated platforms may be checkpoint)
+      // iterate visible chunks near player
+      const chunks = this.getPlatforms(camX, camY); // includes generated
+      for (const p of chunks) {
+        if (p.checkpoint &&
+          px > p.x - PLAYER_SIZE / 2 && px < p.x + p.w + PLAYER_SIZE / 2 &&
+          py > p.y - 10 && py < p.y + p.h + 10) {
+          this.checkpointX = p.x;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Respawn position returns latest checkpoint or a default start
+    getRespawnPos() {
+      if (this.checkpointX) return { x: this.checkpointX + 20, y: BASE_H - 200 };
+      return { x: 60, y: BASE_H - 200 };
+    }
+
+  } // class Level
+
+  // Create level instance
+  let level = new Level();
+
+  /****************
+   * Player class
+   ****************/
+  class Player {
+    constructor() { this.respawn(); }
+    respawn() {
+      const pos = level.getRespawnPos();
+      this.x = pos.x; this.y = pos.y; this.vx = 0; this.vy = 0; this.dead = false; this.deathTimer = 0;
+    }
+
+    update(platforms) {
+      if (this.dead) {
+        this.deathTimer--;
+        if (this.deathTimer <= 0) this.respawn();
+        return;
+      }
+
+      // Input: keyboard or touch
+      let move = 0;
+      if (keys['ArrowLeft'] || keys['KeyA'] || touchState.left) move = -1;
+      if (keys['ArrowRight'] || keys['KeyD'] || touchState.right) move = +1;
+
+      this.vx += move * 1.4;
+      if (!move) this.vx *= 0.78;
+      if (Math.abs(this.vx) > 9) this.vx = Math.sign(this.vx) * 9;
+
+      // Gravity
+      this.vy += GRAVITY;
+      if (this.vy > MAX_FALL) this.vy = MAX_FALL;
+
+      // Simple collisions - sweep platforms (platform top collisions prioritized)
+      let onGround = false;
+      for (const p of platforms) {
+        // broad-phase AABB collision predicted after applying velocity
+        const nextX = this.x + this.vx;
+        const nextY = this.y + this.vy;
+        if (nextX + PLAYER_SIZE > p.x && nextX < p.x + p.w && nextY + PLAYER_SIZE > p.y && nextY < p.y + p.h) {
+          // Vertical collision resolution
+          if (this.vy > 0 && this.y + PLAYER_SIZE <= p.y + 6) {
+            // landing on top
+            this.y = p.y - PLAYER_SIZE;
+            this.vy = 0;
+            onGround = true;
+            if (p.checkpoint) level.checkpointX = p.x;
+          } else if (this.vy < 0 && this.y >= p.y + p.h - 6) {
+            // hit head
+            this.y = p.y + p.h;
+            this.vy = 0.5;
+          } else {
+            // side collision resolve - push out horizontally
+            if (this.vx > 0) {
+              this.x = p.x - PLAYER_SIZE;
+            } else if (this.vx < 0) {
+              this.x = p.x + p.w;
+            }
+            this.vx = 0;
+          }
+        }
+      }
+
+      // Jump: keyboard or touch
+      if ((keys['ArrowUp'] || keys['Space'] || touchState.jump) && onGround) {
+        this.vy = JUMP_V;
+      }
+
+      // Apply velocities
+      this.x += this.vx;
+      this.y += this.vy;
+
+      // If player goes too low off-screen, mark death
+      if (this.y > BASE_H + 240) {
+        this.dead = true;
+        this.deathTimer = 48;
+      }
+    }
+
+    collidesRect(r) {
+      return this.x + PLAYER_SIZE > r.x && this.x < r.x + r.w &&
+             this.y + PLAYER_SIZE > r.y && this.y < r.y + r.h;
     }
   }
-  collides(p){
-    return this.x+PLAYER_SIZE>p.x&&this.x<p.x+p.w&&
-           this.y+PLAYER_SIZE>p.y&&this.y<p.y+p.h;
-  }
-}
-let player = new Player();
 
-// Builder handler
-canvas.addEventListener("mousedown", (e)=>{
-  if (!builderMode || inMenu) return;
-  const rect=canvas.getBoundingClientRect();
-  const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-  const worldX=mx+camX, worldY=my;
-  const tx=Math.floor(worldX/TILE),ty=Math.floor(worldY/TILE);
-  level.toggleBuilderTile(tx,ty);
-});
+  let player = new Player();
 
-let camX=0;
-
-function loop(){
-  if (inMenu) {
-    ctx.clearRect(0,0,W,H);
-    ui.innerHTML = "";
-    requestAnimationFrame(loop);
-    return;
-  }
-  const platforms=level.getPlatforms(camX);
-  player.update(platforms);
-  camX+=(player.x-W/2-camX)*0.11;
-  ctx.fillStyle = invert?"#eee":"#888";
-  ctx.fillRect(0,0,W,H);
-  ctx.save();
-  ctx.translate(-camX,0);
-  for(const p of platforms){
-    let c=invert?"#fff":"#000";
-    if(p.builder)c=invert?"#ccc":"#333";
-    if(p.checkpoint) c = invert ? "#ff0" : "#fc0";
-    ctx.fillStyle=c;
-    ctx.fillRect(p.x,p.y,p.w,p.h);
-    if(p.checkpoint){
-      ctx.strokeStyle=invert?"#333":"#fff";
-      ctx.lineWidth=3;
-      ctx.strokeRect(p.x+6,p.y+6,p.w-12,p.h-12);
+  /****************
+   * Input handling (keyboard + touch)
+   ****************/
+  window.addEventListener('keydown', (e) => {
+    // handle menu toggles when not in menu
+    if (!inMenu) {
+      if (e.code === 'KeyI') invert = !invert;
+      if (e.code === 'KeyB') {
+        builderMode = !builderMode;
+      }
+      if (e.code === 'Escape') {
+        showMenu();
+      }
     }
-  }
-  // Builder hover
-  if(builderMode){
-    const mx=(window.mouseX??0)+camX,my=window.mouseY??0;
-    if(mx>camX&&mx<camX+W&&my>0&&my<H){
-      const tx=Math.floor(mx/TILE),ty=Math.floor(my/TILE);
-      ctx.strokeStyle=invert?"#666":"#fff";
-      ctx.lineWidth=2;
-      ctx.strokeRect(tx*TILE,ty*TILE,TILE,TILE);
-    }
-  }
-  // Player
-  ctx.fillStyle = invert ? "#000" : "#FFF";
-  ctx.beginPath();
-  ctx.rect(player.x,player.y,PLAYER_SIZE,PLAYER_SIZE);
-  ctx.fill();
-  ctx.strokeStyle=invert?"#fff":"#000";
-  ctx.lineWidth=2;
-  ctx.strokeRect(player.x,player.y,PLAYER_SIZE,PLAYER_SIZE);
-  ctx.restore();
-
-  ui.style.color = invert ? "#181818":"#333";
-  if (builderMode) {
-    ui.innerHTML = "BUILDER MODE &nbsp; Click to toggle tile &nbsp; I: Invert &nbsp; B: Exit &nbsp; ESC: Menu";
-  } else {
-    ui.innerHTML = "←/→ Move &nbsp; ↑/SPACE Jump &nbsp; B: Builder &nbsp; I: Invert &nbsp; ESC: Menu";
-  }
-  if(player.dead){
-    ctx.fillStyle=invert?"#fff8":"#0008";
-    ctx.fillRect(0,0,W,H);
-    ctx.font="bold 40px Arial";
-    ctx.fillStyle=invert?"#333":"#fff";
-    ctx.textAlign="center";
-    ctx.fillText("You Died!",W/2,H/2-20);
-    ctx.font="bold 24px Arial";
-    ctx.fillText("Respawning...",W/2,H/2+30);
-  }
-  requestAnimationFrame(loop);
-}
-canvas.addEventListener('mousemove',e=>{
-  const rect=canvas.getBoundingClientRect();
-  window.mouseX=e.clientX-rect.left;window.mouseY=e.clientY-rect.top;
-});
-
-loop();
-
-// ---------- Menu & Level Saving/Loading/Import/Export --------------
-function showMenu(msg="") {
-  inMenu = true; menu.style.display = "block";
-  ui.innerHTML = "";
-  document.getElementById("menuMsg").textContent = msg || "";
-  refreshSavedLevels();
-  if(!document.activeElement) menu.focus();
-}
-function hideMenu() { inMenu = false; menu.style.display = "none"; }
-function saveToLocal() {
-  if (activeLevelName) localStorage.setItem("pl_save_"+activeLevelName, JSON.stringify(level.cloneData()));
-}
-function loadFromLocal(levelName) {
-  const raw = localStorage.getItem("pl_save_"+levelName);
-  if (!raw) return false;
-  try {
-    level.setData(JSON.parse(raw));
-    activeLevelName = levelName;
-    resetPlayer();
-    showMenu(`Loaded saved level "${levelName}"!`);
-    return true;
-  } catch(e) { showMenu("Can't load: " + e); return false; }
-}
-function saveAs(name) {
-  activeLevelName = name;
-  localStorage.setItem("pl_save_"+name, JSON.stringify(level.cloneData()));
-  showMenu(`Level saved with name "${name}"!`);
-}
-function resetPlayer() { player = new Player(); camX = 0; }
-
-let activeLevelName = null;
-
-document.getElementById("menuNewGame").onclick = function(){
-  level = new Level(); activeLevelName = null; resetPlayer(); builderMode = false; hideMenu();
-};
-document.getElementById("menuBuilder").onclick = function(){
-  builderMode = true; hideMenu();
-};
-function refreshSavedLevels() {
-  const saved = [];
-  for(let k in localStorage) {
-    if (k.startsWith("pl_save_")) saved.push(k.substring(8));
-  }
-  const out = [];
-  saved.forEach(name=>{
-    out.push(`<button onclick="loadFromLocal('${name}');hideMenu();">Load "${name}"</button>
-     <button onclick="deleteSavedLevel('${name}');showMenu('Deleted level &quot;${name}&quot;.');" style="font-size:14px;color:#d00;background:#fee;border:solid 1px #d00">Delete</button>`);
+    keys[e.code] = true;
   });
-  document.getElementById("savedButtons").innerHTML = out.length?out.join("<br>"): "<em>None yet.</em>";
-}
-function deleteSavedLevel(name){
-  localStorage.removeItem("pl_save_"+name);
-  refreshSavedLevels();
-}
+  window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
-// Export dialog
-document.getElementById("menuExport").onclick = function(){
-  exportDialog.style.display = "block";
-  document.getElementById("exportJSON").value = JSON.stringify(level.cloneData(),null,2);
-};
-document.getElementById("closeExport").onclick = function() {
-  exportDialog.style.display = "none";
-};
-// Import dialog
-document.getElementById("menuImport").onclick = function(){
-  importDialog.style.display = "block";
-  document.getElementById("importInput").value = "";
-  document.getElementById("importName").value = "";
-  document.getElementById("importMsg").textContent = "";
-};
-document.getElementById("closeImport").onclick = function() {
-  importDialog.style.display = "none";
-};
-document.getElementById("importLoadBtn").onclick = function(){
-  const json = document.getElementById("importInput").value.trim();
-  const name = document.getElementById("importName").value.trim() || "Imported"+(""+Math.random()).slice(-5);
-  try{
-    const data = JSON.parse(json);
-    level.setData(data);
-    activeLevelName = null;
-    resetPlayer(); builderMode = false;
-    if(name) saveAs(name);
-    importDialog.style.display = "none";
-    hideMenu();
-  }catch(err){
-    document.getElementById("importMsg").textContent = "Import error: "+err;
+  // Touch controls: map touches to on-screen buttons
+  function setTouchState(which, value) {
+    touchState[which] = value;
   }
-};
-// Hide dialogs on Esc
-document.addEventListener("keydown",e=>{
-  if(e.code==="Escape") {
-    if (exportDialog.style.display !== "none") {exportDialog.style.display = "none";}
-    if (importDialog.style.display !== "none") {importDialog.style.display = "none";}
-  }
-});
 
-// Start up with menu only
-showMenu();
-document.getElementById("closeMenu")?.addEventListener("click",()=>hideMenu());
-document.body.addEventListener("keydown",e=>{
-  if (inMenu && (e.code==="Space"||e.code==="Enter")) hideMenu();
-});
-</script>
+  // bind on-screen touch buttons
+  const leftBtn = document.getElementById('leftBtn');
+  const rightBtn = document.getElementById('rightBtn');
+  const jumpBtn = document.getElementById('jumpBtn');
+
+  function bindTouchButton(el, onDown, onUp) {
+    // Mouse events
+    el.addEventListener('mousedown', (e) => { e.preventDefault(); onDown(); });
+    document.addEventListener('mouseup', (e) => { onUp(); });
+    // Touch events
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); onDown(); }, {passive:false});
+    el.addEventListener('touchend', (e) => { e.preventDefault(); onUp(); }, {passive:false});
+    el.addEventListener('touchcancel', (e) => { e.preventDefault(); onUp(); }, {passive:false});
+  }
+
+  bindTouchButton(leftBtn, () => setTouchState('left', true), () => setTouchState('left', false));
+  bindTouchButton(rightBtn, () => setTouchState('right', true), () => setTouchState('right', false));
+  bindTouchButton(jumpBtn, () => setTouchState('jump', true), () => setTouchState('jump', false));
+
+  // Canvas mouse for builder mode tile toggling
+  canvas.addEventListener('mousedown', (e) => {
+    if (!builderMode || inMenu) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const worldX = mx + camX;
+    const worldY = my + camY;
+    const tx = Math.floor(worldX / TILE);
+    const ty = Math.floor(worldY / TILE);
+    level.toggleBuilderTile(tx, ty);
+  });
+
+  // For touch: allow tap to toggle tile in builder mode
+  canvas.addEventListener('touchstart', (e) => {
+    if (!builderMode || inMenu) return;
+    const t = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const mx = (t.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (t.clientY - rect.top) * (canvas.height / rect.height);
+    const worldX = mx + camX;
+    const worldY = my + camY;
+    const tx = Math.floor(worldX / TILE);
+    const ty = Math.floor(worldY / TILE);
+    level.toggleBuilderTile(tx, ty);
+  }, {passive:false});
+
+  /****************
+   * Camera & Loop
+   ****************/
+  function updateCamera() {
+    // Follow player smoothly in both axes. Keep player centered vertically for upward gameplay.
+    const targetX = player.x - BASE_W / 2 + PLAYER_SIZE / 2;
+    const targetY = player.y - BASE_H / 2 + PLAYER_SIZE / 2;
+    camX += (targetX - camX) * 0.12;
+    camY += (targetY - camY) * 0.12;
+  }
+
+  function draw() {
+    // Background
+    ctx.fillStyle = invert ? '#eee' : '#888';
+    ctx.fillRect(0, 0, BASE_W, BASE_H);
+
+    // Get platforms in view (based on camera)
+    const platforms = level.getPlatforms(camX, camY);
+
+    // Translate world to camera space for drawing
+    ctx.save();
+    ctx.translate(-camX, -camY);
+
+    // Draw platforms
+    for (const p of platforms) {
+      if (p.builder) ctx.fillStyle = invert ? '#ddd' : '#333';
+      else ctx.fillStyle = p.checkpoint ? (invert ? '#ff8' : '#fc0') : (invert ? '#fff' : '#000');
+      ctx.fillRect(p.x, p.y, p.w, p.h);
+      // small outline for checkpoints
+      if (p.checkpoint) {
+        ctx.strokeStyle = invert ? '#333' : '#fff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(p.x + 6, p.y + 6, p.w - 12, p.h - 12);
+      }
+    }
+
+    // Player (square)
+    ctx.fillStyle = invert ? '#000' : '#fff';
+    ctx.fillRect(player.x, player.y, PLAYER_SIZE, PLAYER_SIZE);
+    ctx.strokeStyle = invert ? '#fff' : '#000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(player.x, player.y, PLAYER_SIZE, PLAYER_SIZE);
+
+    // When in builder mode, draw a hover tile under mouse (if available)
+    if (builderMode && window._mouseWorld) {
+      const { mx, my } = window._mouseWorld;
+      // draw grid cell
+      ctx.strokeStyle = invert ? '#666' : '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(Math.floor(mx / TILE) * TILE, Math.floor(my / TILE) * TILE, TILE, TILE);
+    }
+
+    ctx.restore();
+
+    // UI text
+    const uiText = builderMode ? 'BUILDER MODE • Tap/click to toggle tile • B: Exit • ESC: Menu' : '←/→ Move • ↑/SPACE Jump • B: Builder • I: Invert • ESC: Menu';
+    document.getElementById('ui').textContent = uiText;
+
+    // Death overlay
+    if (player.dead) {
+      ctx.fillStyle = invert ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, BASE_W, BASE_H);
+      ctx.font = 'bold 40px Arial';
+      ctx.fillStyle = invert ? '#333' : '#fff';
+      ctx.textAlign = 'center';
+      ctx.fillText('You Died!', BASE_W / 2, BASE_H / 2 - 10);
+      ctx.font = '20px Arial';
+      ctx.fillText('Respawning...', BASE_W / 2, BASE_H / 2 + 28);
+    }
+  }
+
+  function step() {
+    if (inMenu) {
+      // menu shown — freeze game visuals/physics but still clear canvas
+      ctx.clearRect(0, 0, BASE_W, BASE_H);
+      requestAnimationFrame(step);
+      return;
+    }
+
+    // Update game:
+    // 1) Ensure chunks around camera are generated (this triggers procedural world expansion both up and sideways)
+    // generation is lazy inside level.getPlatforms (called in draw), but ensure at least near current camera:
+    level.getPlatforms(camX, camY);
+
+    // 2) Update player physics with platforms visible nearby (to detect collisions)
+    const pview = level.getPlatforms(camX, camY);
+    player.update(pview);
+
+    // 3) Smooth camera follow
+    updateCamera();
+
+    // 4) Draw scene
+    draw();
+
+    // 5) Schedule next frame
+    requestAnimationFrame(step);
+  }
+
+  // Track mouse position converted to world coords for builder hover rendering
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+    window._mouseWorld = { mx: mx + camX, my: my + camY };
+  });
+
+  // Start the loop
+  requestAnimationFrame(step);
+
+  /****************
+   * Saving, loading, import/export (localStorage + remote folder scan)
+   ****************/
+
+  const LS_PREFIX = 'pf_level_'; // localStorage key prefix
+
+  // Autosave working level as 'autosave' so builder edits persist
+  function autosaveCurrentLevel() {
+    try {
+      const data = level.exportData();
+      localStorage.setItem(LS_PREFIX + 'autosave', JSON.stringify(data));
+    } catch (err) {
+      console.warn('Autosave failed', err);
+    }
+  }
+
+  // Save named level
+  function saveLevelAs(name) {
+    try {
+      const data = level.exportData();
+      localStorage.setItem(LS_PREFIX + name, JSON.stringify(data));
+      refreshSavedList();
+      showMessage('Saved as "' + name + '"');
+    } catch (err) {
+      showMessage('Save failed: ' + err);
+    }
+  }
+
+  // Load named saved level
+  function loadSavedLevel(name) {
+    try {
+      const raw = localStorage.getItem(LS_PREFIX + name);
+      if (!raw) { showMessage('No saved level by that name'); return; }
+      const obj = JSON.parse(raw);
+      level.importData(obj);
+      player.respawn();
+      camX = camY = 0;
+      showMessage('Loaded "' + name + '"');
+    } catch (err) {
+      showMessage('Load failed: ' + err);
+    }
+  }
+
+  // Delete saved
+  function deleteSavedLevel(name) {
+    localStorage.removeItem(LS_PREFIX + name);
+    refreshSavedList();
+    showMessage('Deleted "' + name + '"');
+  }
+
+  // Refresh saved list UI
+  function refreshSavedList() {
+    const listEl = document.getElementById('savedList');
+    listEl.innerHTML = '';
+    const keysArr = Object.keys(localStorage).filter(k => k.startsWith(LS_PREFIX));
+    if (keysArr.length === 0) {
+      listEl.innerHTML = '<div style="color:#444; font-style:italic">No saved levels</div>';
+      return;
+    }
+    // Build buttons for each saved level
+    for (const k of keysArr) {
+      const name = k.substring(LS_PREFIX.length);
+      const row = document.createElement('div');
+      row.style.marginBottom = '8px';
+      row.innerHTML = `<strong>${name}</strong> `;
+      const loadBtn = document.createElement('button');
+      loadBtn.className = 'btn';
+      loadBtn.textContent = 'Load';
+      loadBtn.onclick = () => { loadSavedLevel(name); inMenu = false; hideMenu(); };
+      const playBtn = document.createElement('button');
+      playBtn.className = 'btn';
+      playBtn.textContent = 'Play';
+      playBtn.onclick = () => { loadSavedLevel(name); inMenu = false; hideMenu(); };
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn danger';
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = () => { if (confirm('Delete "' + name + '"?')) deleteSavedLevel(name); };
+      row.appendChild(loadBtn);
+      row.appendChild(playBtn);
+      row.appendChild(delBtn);
+      listEl.appendChild(row);
+    }
+  }
+
+  // Export current level -> show JSON for copy
+  const exportDialog = document.getElementById('exportDialog');
+  function openExportDialog() {
+    const area = document.getElementById('exportArea');
+    area.value = JSON.stringify(level.exportData(), null, 2);
+    exportDialog.style.display = 'block';
+  }
+
+  document.getElementById('exportCopy').addEventListener('click', () => {
+    const text = document.getElementById('exportArea').value;
+    navigator.clipboard?.writeText(text).then(() => showMessage('Copied to clipboard'));
+  });
+  document.getElementById('exportClose').addEventListener('click', () => exportDialog.style.display = 'none');
+
+  // Import
+  const importDialog = document.getElementById('importDialog');
+  function openImportDialog() {
+    document.getElementById('importArea').value = '';
+    document.getElementById('importName').value = '';
+    document.getElementById('importMsg').textContent = '';
+    importDialog.style.display = 'block';
+  }
+  document.getElementById('importLoad').addEventListener('click', () => {
+    const txt = document.getElementById('importArea').value.trim();
+    if (!txt) { document.getElementById('importMsg').textContent = 'Paste JSON first'; return; }
+    try {
+      const data = JSON.parse(txt);
+      level.importData(data);
+      player.respawn();
+      camX = camY = 0;
+      const name = document.getElementById('importName').value.trim();
+      if (name) saveLevelAs(name);
+      importDialog.style.display = 'none';
+      showMessage('Imported level' + (name ? ' and saved as "' + name + '"' : ''));
+    } catch (err) {
+      document.getElementById('importMsg').textContent = 'Invalid JSON: ' + err;
+    }
+  });
+  document.getElementById('importClose').addEventListener('click', () => importDialog.style.display = 'none');
+
+  /****************
+   * Menu controls and remote folder scanning
+   ****************/
+  // Show/hide menu
+  function showMenu(msg) {
+    inMenu = true;
+    document.getElementById('menu').style.display = 'block';
+    if (msg) showMessage(msg);
+    refreshSavedList();
+    scanFolderForJSON(); // try to detect remote JSON files when menu opens
+    // show touch controls only when not in menu
+    updateTouchControlsVisibility();
+  }
+  function hideMenu() {
+    inMenu = false;
+    document.getElementById('menu').style.display = 'none';
+    updateTouchControlsVisibility();
+  }
+  document.getElementById('menuClose').addEventListener('click', hideMenu);
+
+  // Menu button bindings
+  document.getElementById('menuNew').addEventListener('click', () => {
+    if (!confirm('Create a blank new level? Unsaved edits will be lost.')) return;
+    level.resetToBlank();
+    player.respawn();
+    camX = camY = 0;
+    showMessage('New blank level created');
+  });
+  document.getElementById('menuPlay').addEventListener('click', () => { hideMenu(); });
+  document.getElementById('menuBuilder').addEventListener('click', () => { builderMode = true; hideMenu(); });
+  document.getElementById('menuSave').addEventListener('click', () => { autosaveCurrentLevel(); showMessage('Autosaved'); });
+  document.getElementById('menuExport').addEventListener('click', openExportDialog);
+  document.getElementById('menuImportOpen').addEventListener('click', openImportDialog);
+
+  // Save As button (use input)
+  document.getElementById('saveAsBtn').addEventListener('click', () => {
+    const name = document.getElementById('saveName').value.trim();
+    if (!name) { showMessage('Enter a name to save'); return; }
+    saveLevelAs(name);
+  });
+
+  // Remote JSON scanning: Attempt to fetch directory URL and parse anchor hrefs for .json links.
+  // NOTE: This works when server returns an HTML directory listing with links, or if the index HTML contains links.
+  async function scanFolderForJSON() {
+    const remoteList = document.getElementById('remoteList');
+    const status = document.getElementById('remoteStatus');
+    remoteList.innerHTML = 'Scanning folder for .json files...';
+    status.textContent = '';
+    try {
+      // Derive folder URL (directory) from current location
+      const href = window.location.href;
+      // If the page is index.html, we want the directory URL (strip filename)
+      const parts = href.split('/');
+      parts.pop(); // remove last segment
+      const dirUrl = parts.join('/') + '/';
+      // Try to fetch directory listing
+      const resp = await fetch(dirUrl, { method: 'GET' });
+      const text = await resp.text();
+      // Parse anchors and find .json links
+      const jsonUrls = [];
+      // find href="...json" or href='...json' or plain links
+      const hrefRegex = /href\s*=\s*["']([^"']+\.json)["']/ig;
+      let m;
+      while ((m = hrefRegex.exec(text)) !== null) {
+        jsonUrls.push(m[1]);
+      }
+      // Also attempt to find plain links to .json (no href attr)
+      const plainRegex = /(?:["'\(])([^"'\(\)]+\.json)(?:["'\)])/ig;
+      while ((m = plainRegex.exec(text)) !== null) {
+        if (!jsonUrls.includes(m[1])) jsonUrls.push(m[1]);
+      }
+      // Normalize relative URLs
+      const normalized = jsonUrls.map(u => {
+        if (u.startsWith('http://') || u.startsWith('https://')) return u;
+        // If u starts with '/', build absolute based on origin
+        if (u.startsWith('/')) return window.location.origin + u;
+        // Otherwise relative to dirUrl
+        return dirUrl + u;
+      });
+
+      // Remove duplicates
+      const uniq = [...new Set(normalized)];
+      if (uniq.length === 0) {
+        remoteList.innerHTML = 'No .json links found in directory listing.';
+        status.textContent = '(If your server hides directory listings, place explicit links or use import.)';
+        return;
+      }
+      // Build UI entries
+      remoteList.innerHTML = '';
+      for (const url of uniq) {
+        const name = url.split('/').pop();
+        const row = document.createElement('div');
+        row.style.marginBottom = '8px';
+        row.innerHTML = `<strong>${name}</strong> `;
+        const loadBtn = document.createElement('button');
+        loadBtn.className = 'btn';
+        loadBtn.textContent = 'Load';
+        loadBtn.onclick = async () => {
+          try {
+            const r = await fetch(url);
+            const d = await r.json();
+            level.importData(d);
+            player.respawn();
+            hideMenu();
+            showMessage('Loaded remote ' + name);
+          } catch (err) {
+            showMessage('Failed to load remote JSON: ' + err);
+          }
+        };
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn';
+        saveBtn.textContent = 'Save Locally';
+        saveBtn.onclick = async () => {
+          try {
+            const r = await fetch(url);
+            const d = await r.json();
+            const suggested = name.replace(/\.json$/i, '');
+            saveLevelAs(suggested);
+            // store imported JSON under LS_PREFIX + suggested
+            localStorage.setItem(LS_PREFIX + suggested, JSON.stringify(d));
+            refreshSavedList();
+            showMessage('Saved remote as "' + suggested + '"');
+          } catch (err) {
+            showMessage('Failed to fetch remote: ' + err);
+          }
+        };
+        row.appendChild(loadBtn);
+        row.appendChild(saveBtn);
+        remoteList.appendChild(row);
+      }
+
+    } catch (err) {
+      remoteList.innerHTML = 'Could not scan folder for .json files: ' + err;
+      status.textContent = '(You can still import manually)';
+    }
+  }
+
+  document.getElementById('remoteRescan').addEventListener('click', scanFolderForJSON);
+
+  /****************
+   * Utilities & UI helpers
+   ****************/
+  // Simple one-line status message in top UI for a few seconds
+  let _msgTimer = 0;
+  function showMessage(t) {
+    const ui = document.getElementById('ui');
+    ui.textContent = t;
+    _msgTimer = 240; // ~4 seconds at 60fps
+  }
+  // tick down message timer in background
+  setInterval(() => {
+    if (_msgTimer > 0) {
+      _msgTimer--;
+      if (_msgTimer === 0) {
+        document.getElementById('ui').textContent = builderMode ? 'BUILDER MODE • Tap/click to toggle tile • B: Exit • ESC: Menu' : '←/→ Move • ↑/SPACE Jump • B: Builder • I: Invert • ESC: Menu';
+      }
+    }
+  }, 1000 / 60);
+
+  // Show/hide touch controls depending on input device & menu state
+  function isTouchDevice() {
+    return (('ontouchstart' in window) || navigator.maxTouchPoints > 0);
+  }
+  function updateTouchControlsVisibility() {
+    const tc = document.getElementById('touchControls');
+    if (isTouchDevice() && !inMenu) tc.style.display = 'flex'; else tc.style.display = 'none';
+  }
+  updateTouchControlsVisibility();
+
+  // load autosave if present on startup
+  (function loadAutosaveIfExists() {
+    const raw = localStorage.getItem(LS_PREFIX + 'autosave');
+    if (raw) {
+      try {
+        const d = JSON.parse(raw);
+        level.importData(d);
+        showMessage('Restored autosave');
+      } catch (err) {
+        console.warn('Autosave parse failed', err);
+      }
+    }
+  })();
+
+  // Refresh list initially
+  refreshSavedList();
+
+  /****************
+   * Menu startup: show menu first
+   ****************/
+  // Menu bindings for top buttons are already set above
+  document.getElementById('menu').style.display = 'block';
+  inMenu = true;
+
+  /****************
+   * Save current level periodically (autosave every few seconds when in builder mode)
+   ****************/
+  setInterval(() => {
+    if (builderMode) autosaveCurrentLevel();
+  }, 4000);
+
+  /****************
+   * Keyboard toggle for builder (B) while in play
+   ****************/
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyB' && !inMenu) {
+      builderMode = !builderMode;
+      showMessage(builderMode ? 'Builder mode ON' : 'Builder mode OFF');
+    }
+  });
+
+  /****************
+   * Helpful comments for maintainers / players:
+   *
+   * - Level export/import format:
+   *   { staticPlatforms: [{x,y,w,h,checkpoint?}, ...],
+   *     builderTiles: { "tx_ty": true, ... },
+   *     checkpointX: <number> }
+   *
+   * - Generated procedural chunks are not included in exported data (they're generated at runtime).
+   * - Remote folder scanning:
+   *   We attempt to fetch the directory URL (same folder) and parse HTML for .json links.
+   *   This works if your web server returns an HTML directory listing (e.g., Apache, nginx autoindex)
+   *   or if you include explicit <a href="file.json"> links in an index.html file.
+   *   If your server forbids directory listing, use the Import dialog to paste JSON, or put links in index.html.
+   *
+   * - iPad / touch:
+   *   On touch devices, large on-screen Left/Right/Jump buttons appear. They send continuous input while pressed.
+   *
+   * - Builder mode:
+   *   Click/tap on the world to toggle tiles on the TILE grid. Edits are autosaved to localStorage (autosave).
+   *
+   ****************/
+
+  </script>
 </body>
 </html>
