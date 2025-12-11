@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Platformer — Builder Only (No Procedural Tiles)</title>
+  <title>Platformer v6.2 — Builder Fixed, Export File/Text</title>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no" />
   <style>
     :root { --ui-bg: rgba(240,240,240,0.95); --dark: #111; --light: #fff; }
@@ -18,9 +18,13 @@
     .touchBtn { width:76px; height:76px; border-radius:14px; background:rgba(255,255,255,0.92); display:flex; align-items:center; justify-content:center; font-size:20px; border:1px solid #555; box-shadow:0 6px 18px rgba(0,0,0,0.18); -webkit-tap-highlight-color: transparent; user-select:none; }
     .touchBtn.small { width:64px; height:64px; }
     @media (max-width:520px) { .touchBtn { width:64px; height:64px; } .touchBtn.small { width:56px; height:56px; } }
+    /* small version label */
+    #versionBadge { position:fixed; right:8px; top:8px; background:#eee; padding:6px 8px; border-radius:8px; font-family:monospace; z-index:300; pointer-events:none; color:#333; font-size:12px; }
   </style>
 </head>
 <body>
+  <div id="versionBadge">v6.2</div>
+
   <canvas id="gameCanvas" width="900" height="600"></canvas>
   <div id="ui">←/→ Move  •  ↑/Space Jump  •  B: Builder  •  I: Invert  •  ESC: Menu</div>
 
@@ -30,7 +34,7 @@
     <div>
       <button id="menuNew" class="btn">New Blank Level</button>
       <button id="menuPlay" class="btn">Play Current Level</button>
-      <button id="menuBuilder" class="btn">Open Builder</button>
+      <button id="menuBuilderBtn" class="btn">Open Builder</button>
       <button id="menuSave" class="btn">Autosave</button>
       <button id="menuExport" class="btn">Export (JSON)</button>
       <button id="menuImportOpen" class="btn">Import (Paste JSON)</button>
@@ -56,7 +60,7 @@
         <button id="remoteRescan" class="btn">Rescan Folder</button>
       </div>
       <div style="margin-top:10px; font-size:13px; color:#444;">
-        If your server doesn't expose directory listings, use Import to paste JSON or add explicit links to index.html.
+        If your server hides directory listings, use Import or add explicit links.
       </div>
     </div>
 
@@ -70,7 +74,8 @@
     <h2>Export Current Level (JSON)</h2>
     <textarea id="exportArea" readonly></textarea>
     <div style="text-align:right; margin-top:8px;">
-      <button id="exportCopy" class="btn">Copy</button>
+      <button id="exportCopy" class="btn">Copy Text</button>
+      <button id="exportDownload" class="btn">Download .json</button>
       <button id="exportClose" class="btn">Close</button>
     </div>
   </div>
@@ -107,10 +112,12 @@
 
 <script>
 /*
-  This file: Platformer with Builder, export/import, touch support.
-  Key change: NO procedurally generated tiles/chunks except the small starter ground
-  (staticPlatforms) created by "New Blank Level" / reset. Everything else must be placed
-  via the builder or imported JSON. This ensures no runtime-created tiles appear.
+  Platformer v6.2
+  - Fix: pressing "B" to toggle builder will now reliably enable builder mode AND allow taps to place/remove tiles.
+    (If you press B to enter builder, the menu will automatically hide so canvas taps register.)
+  - Export: you can now Copy the JSON text OR Download a .json file.
+  - Includes comments and small UI tweaks.
+  - No procedural generation of game tiles (only starter ground).
 */
 
 /* ---------- Canvas + resize ---------- */
@@ -118,7 +125,6 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const BASE_W = 900, BASE_H = 600;
 function resizeCanvas() {
-  // keep internal resolution fixed; scale CSS size to fit screen
   const maxW = Math.min(window.innerWidth, 1400);
   const maxH = Math.min(window.innerHeight, 1000);
   let scale = Math.min(maxW / BASE_W, maxH / BASE_H);
@@ -145,30 +151,22 @@ let camX = 0, camY = 0;
 const keys = {};
 let touchState = { left: false, right: false, jump: false };
 
-/* ---------- Level (no procedural generation) ----------
-   - staticPlatforms: only platforms saved/imported/created by builder or New Level.
-   - builderTiles: grid toggles saved to localStorage/autosave.
-   - NO generated chunks at runtime (by request).
-*/
+/* ---------- Level (no procedural generation) ---------- */
 class Level {
   constructor() { this.resetToBlank(); }
   resetToBlank() {
-    // clear and create small starter ground only
     this.staticPlatforms = [];
     this.builderTiles = {};
     this.checkpointX = 0;
-    // starter ground centered at x=0 (a few tiles)
     for (let i = -6; i <= 6; i++) {
       this.staticPlatforms.push({ x: i * TILE, y: BASE_H - 80, w: TILE, h: TILE });
     }
   }
-  // Toggle builder tile at tile coords
   toggleBuilderTile(tx, ty) {
     const k = tx + '_' + ty;
     this.builderTiles[k] = !this.builderTiles[k];
     autosaveCurrentLevel();
   }
-  // Return platforms for rendering/collision: static + builder tiles only.
   getPlatforms(viewX, viewY) {
     const out = [];
     for (const p of this.staticPlatforms) out.push(p);
@@ -180,7 +178,6 @@ class Level {
     }
     return out;
   }
-  // Export only editable parts
   exportData() {
     return {
       staticPlatforms: JSON.parse(JSON.stringify(this.staticPlatforms)),
@@ -188,7 +185,6 @@ class Level {
       checkpointX: this.checkpointX || 0
     };
   }
-  // Import / load level data
   importData(d) {
     this.staticPlatforms = d.staticPlatforms || [];
     this.builderTiles = d.builderTiles || {};
@@ -223,60 +219,72 @@ class Player {
     if (this.dead) {
       this.deathTimer--; if (this.deathTimer <= 0) this.respawn(); return;
     }
-    // movement input
     let move = 0;
     if (keys['ArrowLeft'] || keys['KeyA'] || touchState.left) move = -1;
     if (keys['ArrowRight'] || keys['KeyD'] || touchState.right) move = 1;
     this.vx += move * 1.4;
     if (!move) this.vx *= 0.78;
     if (Math.abs(this.vx) > 9) this.vx = Math.sign(this.vx) * 9;
-    // gravity
     this.vy += GRAVITY;
     if (this.vy > MAX_FALL) this.vy = MAX_FALL;
-    // collision (simple AABB)
+
     let onGround = false;
     for (const p of platforms) {
       const nextX = this.x + this.vx;
       const nextY = this.y + this.vy;
       if (nextX + PLAYER_SIZE > p.x && nextX < p.x + p.w && nextY + PLAYER_SIZE > p.y && nextY < p.y + p.h) {
-        // landing
         if (this.vy > 0 && this.y + PLAYER_SIZE <= p.y + 6) {
           this.y = p.y - PLAYER_SIZE; this.vy = 0; onGround = true;
           if (p.checkpoint) level.checkpointX = p.x;
         } else if (this.vy < 0 && this.y >= p.y + p.h - 6) {
           this.y = p.y + p.h; this.vy = 0.5;
         } else {
-          // push horizontally
           if (this.vx > 0) this.x = p.x - PLAYER_SIZE;
           else if (this.vx < 0) this.x = p.x + p.w;
           this.vx = 0;
         }
       }
     }
-    // jump
+
     if ((keys['ArrowUp'] || keys['Space'] || touchState.jump) && onGround) {
       this.vy = JUMP_V;
     }
-    // apply velocities
     this.x += this.vx; this.y += this.vy;
-    // death off bottom
     if (this.y > BASE_H + 240) { this.dead = true; this.deathTimer = 48; }
   }
 }
 let player = new Player();
 
 /* ---------- Input (keyboard + touch) ---------- */
+
+/*
+  IMPORTANT FIX (v6.2):
+  Pressing "B" now toggles builder mode AND if builder mode becomes ON, the menu is automatically hidden
+  so that subsequent taps/clicks on the canvas will be recognized as builder actions.
+*/
 window.addEventListener('keydown', (e) => {
-  if (!inMenu) {
-    if (e.code === 'KeyI') invert = !invert;
-    if (e.code === 'KeyB') { builderMode = !builderMode; showTransient(builderMode ? 'Builder ON' : 'Builder OFF'); }
-    if (e.code === 'Escape') showMenu();
+  // Allow toggles even when menu is open:
+  if (e.code === 'KeyI') {
+    invert = !invert;
+    showTransient(invert ? 'Inverted' : 'Normal');
+    return;
   }
+  if (e.code === 'KeyB') {
+    // Toggle builder mode and ensure the menu is closed so taps work immediately
+    toggleBuilder();
+    return;
+  }
+  if (e.code === 'Escape') {
+    // Escape toggles menu; if builder is active, we keep it toggled until user turns it off
+    if (inMenu) hideMenu(); else showMenu();
+    return;
+  }
+  // store other keys normally
   keys[e.code] = true;
 });
 window.addEventListener('keyup', (e) => keys[e.code] = false);
 
-// Touch buttons mapping
+// Touch controls
 function setTouch(which, val) { touchState[which] = val; }
 const leftBtn = document.getElementById('leftBtn');
 const rightBtn = document.getElementById('rightBtn');
@@ -293,6 +301,12 @@ bindTouch(rightBtn, () => setTouch('right', true), () => setTouch('right', false
 bindTouch(jumpBtn, () => setTouch('jump', true), () => setTouch('jump', false));
 
 /* ---------- Builder click/touch handling ---------- */
+/*
+  Canvas clicks/taps will toggle tiles only if:
+   - builderMode === true
+   - inMenu === false
+  v6.2 ensures that toggling builder via "B" will hide the menu and set inMenu=false so taps work.
+*/
 canvas.addEventListener('mousedown', (e) => {
   if (!builderMode || inMenu) return;
   const rect = canvas.getBoundingClientRect();
@@ -314,8 +328,6 @@ canvas.addEventListener('touchstart', (e) => {
   const tx = Math.floor(worldX / TILE), ty = Math.floor(worldY / TILE);
   level.toggleBuilderTile(tx, ty);
 }, {passive:false});
-
-// track mouse world for hover display in builder
 canvas.addEventListener('mousemove', (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -330,52 +342,31 @@ function updateCamera() {
   camX += (targetX - camX) * 0.12;
   camY += (targetY - camY) * 0.12;
 }
-
 function draw() {
-  // background
   ctx.fillStyle = invert ? '#eee' : '#888';
   ctx.fillRect(0, 0, BASE_W, BASE_H);
-
-  // get platforms (static + builder only)
   const platforms = level.getPlatforms(camX, camY);
-
-  // world draw
-  ctx.save();
-  ctx.translate(-camX, -camY);
-
-  // draw platforms
+  ctx.save(); ctx.translate(-camX, -camY);
   for (const p of platforms) {
     if (p.builder) ctx.fillStyle = invert ? '#ddd' : '#333';
     else ctx.fillStyle = p.checkpoint ? (invert ? '#ff8' : '#fc0') : (invert ? '#fff' : '#000');
     ctx.fillRect(p.x, p.y, p.w, p.h);
     if (p.checkpoint) {
-      ctx.strokeStyle = invert ? '#333' : '#fff';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = invert ? '#333' : '#fff'; ctx.lineWidth = 3;
       ctx.strokeRect(p.x + 6, p.y + 6, p.w - 12, p.h - 12);
     }
   }
-
-  // builder hover
   if (builderMode && window._mouseWorld) {
     const { mx, my } = window._mouseWorld;
-    ctx.strokeStyle = invert ? '#666' : '#fff';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = invert ? '#666' : '#fff'; ctx.lineWidth = 2;
     ctx.strokeRect(Math.floor(mx / TILE) * TILE, Math.floor(my / TILE) * TILE, TILE, TILE);
   }
-
-  // player
   ctx.fillStyle = invert ? '#000' : '#fff';
   ctx.fillRect(player.x, player.y, PLAYER_SIZE, PLAYER_SIZE);
-  ctx.strokeStyle = invert ? '#fff' : '#000';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = invert ? '#fff' : '#000'; ctx.lineWidth = 2;
   ctx.strokeRect(player.x, player.y, PLAYER_SIZE, PLAYER_SIZE);
-
   ctx.restore();
-
-  // UI text
   document.getElementById('ui').textContent = builderMode ? 'BUILDER MODE • Tap/click to toggle tile • B: Exit • ESC: Menu' : '←/→ Move • ↑/SPACE Jump • B: Builder • I: Invert • ESC: Menu';
-
-  // death overlay
   if (player.dead) {
     ctx.fillStyle = invert ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.6)';
     ctx.fillRect(0, 0, BASE_W, BASE_H);
@@ -384,10 +375,8 @@ function draw() {
     ctx.font = '20px Arial'; ctx.fillText('Respawning...', BASE_W / 2, BASE_H / 2 + 28);
   }
 }
-
 function step() {
   if (inMenu) { ctx.clearRect(0,0,BASE_W,BASE_H); requestAnimationFrame(step); return; }
-  // update physics with current platforms
   const platforms = level.getPlatforms(camX, camY);
   player.update(platforms);
   updateCamera();
@@ -397,12 +386,10 @@ function step() {
 requestAnimationFrame(step);
 
 /* ---------- Autosave / localStorage / import-export ---------- */
-const LS_PREFIX = 'pf_level_'; // prefix for saved named levels
+const LS_PREFIX = 'pf_level_';
 function autosaveCurrentLevel() {
-  try {
-    const data = level.exportData();
-    localStorage.setItem(LS_PREFIX + 'autosave', JSON.stringify(data));
-  } catch (err) { console.warn('Autosave failed', err); }
+  try { localStorage.setItem(LS_PREFIX + 'autosave', JSON.stringify(level.exportData())); }
+  catch (err) { console.warn('Autosave failed', err); }
 }
 function saveLevelAs(name) {
   try {
@@ -418,8 +405,7 @@ function loadSavedLevel(name) {
     if (!raw) { showTransient('No saved level by that name'); return; }
     const obj = JSON.parse(raw);
     level.importData(obj);
-    player.respawn();
-    camX = camY = 0;
+    player.respawn(); camX = camY = 0;
     showTransient('Loaded "' + name + '"');
   } catch (err) { showTransient('Load failed: ' + err); }
 }
@@ -447,15 +433,30 @@ function refreshSavedList() {
   }
 }
 
-/* Export */
+/* Export dialog with Copy + Download */
 const exportDialog = document.getElementById('exportDialog');
 function openExportDialog() {
-  document.getElementById('exportArea').value = JSON.stringify(level.exportData(), null, 2);
+  const area = document.getElementById('exportArea');
+  area.value = JSON.stringify(level.exportData(), null, 2);
   exportDialog.style.display = 'block';
 }
 document.getElementById('exportCopy').addEventListener('click', () => {
   const text = document.getElementById('exportArea').value;
-  navigator.clipboard?.writeText(text).then(() => showTransient('Copied to clipboard'));
+  navigator.clipboard?.writeText(text).then(() => showTransient('Copied to clipboard'), () => showTransient('Copy failed'));
+});
+document.getElementById('exportDownload').addEventListener('click', () => {
+  const text = document.getElementById('exportArea').value;
+  const blob = new Blob([text], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const now = new Date().toISOString().replace(/[:.]/g, '-');
+  a.download = `platformer-level-${now}.json`;
+  a.href = url;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showTransient('Downloaded JSON file');
 });
 document.getElementById('exportClose').addEventListener('click', () => exportDialog.style.display = 'none');
 
@@ -488,20 +489,17 @@ document.getElementById('importClose').addEventListener('click', () => importDia
 function showMenu(msg) {
   inMenu = true; document.getElementById('menu').style.display = 'block';
   if (msg) showTransient(msg);
-  refreshSavedList();
-  scanFolderForJSON();
-  updateTouchControlsVisibility();
+  refreshSavedList(); scanFolderForJSON(); updateTouchControlsVisibility();
 }
 function hideMenu() { inMenu = false; document.getElementById('menu').style.display = 'none'; updateTouchControlsVisibility(); }
 document.getElementById('menuClose').addEventListener('click', hideMenu);
 
-/* Menu buttons */
 document.getElementById('menuNew').addEventListener('click', () => {
   if (!confirm('Create a blank new level? Unsaved edits will be lost.')) return;
   level.resetToBlank(); player.respawn(); camX = camY = 0; showTransient('New blank level');
 });
 document.getElementById('menuPlay').addEventListener('click', () => hideMenu());
-document.getElementById('menuBuilder').addEventListener('click', () => { builderMode = true; hideMenu(); });
+document.getElementById('menuBuilderBtn').addEventListener('click', () => { toggleBuilder(true); });
 document.getElementById('menuSave').addEventListener('click', () => { autosaveCurrentLevel(); showTransient('Autosaved'); });
 document.getElementById('menuExport').addEventListener('click', openExportDialog);
 document.getElementById('menuImportOpen').addEventListener('click', openImportDialog);
@@ -511,7 +509,7 @@ document.getElementById('saveAsBtn').addEventListener('click', () => {
   saveLevelAs(name);
 });
 
-/* Remote folder scan for JSON files (best-effort) */
+/* Remote folder scan for JSON files */
 async function scanFolderForJSON() {
   const remoteList = document.getElementById('remoteList'), status = document.getElementById('remoteStatus');
   remoteList.innerHTML = 'Scanning folder for .json files...'; status.textContent = '';
@@ -571,7 +569,7 @@ setInterval(() => {
   if (_msgTimer > 0) { _msgTimer--; if (_msgTimer === 0) document.getElementById('ui').textContent = builderMode ? 'BUILDER MODE • Tap/click to toggle tile • B: Exit • ESC: Menu' : '←/→ Move • ↑/SPACE Jump • B: Builder • I: Invert • ESC: Menu'; }
 }, 1000/60);
 
-/* ---------- Load autosave if present ---------- */
+/* ---------- Autosave load on start ---------- */
 (function loadAutosave() {
   const raw = localStorage.getItem(LS_PREFIX + 'autosave');
   if (raw) {
@@ -582,37 +580,44 @@ setInterval(() => {
 /* ---------- Periodic autosave while in builder ---------- */
 setInterval(() => { if (builderMode) autosaveCurrentLevel(); }, 4000);
 
-/* ---------- Menu startup ---------- */
+/* ---------- Toggle builder helper (v6.2) ---------- */
+function toggleBuilder(forceOn) {
+  // If forceOn === true, ensure builder is ON.
+  if (typeof forceOn === 'boolean') builderMode = forceOn;
+  else builderMode = !builderMode;
+  // Important fix: if builder turned on via keyboard 'B', hide menu so canvas receives taps
+  if (builderMode) {
+    // ensure we are playing and can tap to place tiles
+    inMenu = false;
+    document.getElementById('menu').style.display = 'none';
+  }
+  // Update touch controls visibility too
+  updateTouchControlsVisibility();
+  showTransient(builderMode ? 'Builder ON' : 'Builder OFF');
+}
+
+/* ---------- Start UI state ---------- */
 document.getElementById('menu').style.display = 'block';
 inMenu = true;
 refreshSavedList();
 scanFolderForJSON();
 updateTouchControlsVisibility();
 
-/* ---------- Bind export/import/menu controls ---------- */
+/* ---------- Bind export/import/menu close ---------- */
 document.getElementById('exportClose').addEventListener('click', () => exportDialog.style.display = 'none');
-document.getElementById('menu').addEventListener('keydown', (e) => { if (inMenu && (e.code === 'Enter' || e.code === 'Space')) hideMenu(); });
-document.getElementById('exportArea').style.fontFamily = 'monospace';
-document.getElementById('importArea').style.fontFamily = 'monospace';
+document.getElementById('importClose').addEventListener('click', () => importDialog.style.display = 'none');
 
-/* ---------- Exposure: allow toggling builder from keyboard while playing ---------- */
-window.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyB' && !inMenu) { builderMode = !builderMode; showTransient(builderMode ? 'Builder ON' : 'Builder OFF'); }
-});
+/* ---------- Expose functions to console for debugging (optional) ---------- */
+window._level = level;
+window._player = player;
+window.toggleBuilder = toggleBuilder; // allow console toggling if desired
 
-/* ---------- Comments / Notes ----------
-  - No runtime procedural/generated tiles are created anywhere.
-    Only "starter" tiles created in resetToBlank() exist by default.
-    All additional tiles must be placed via Builder or imported JSON.
-  - Export format:
-    { staticPlatforms: [{x,y,w,h,checkpoint?}, ...], builderTiles: { "tx_ty": true }, checkpointX: number }
-  - Remote folder scanning is best-effort: it parses the directory HTML for ".json" links.
-    If your server doesn't list the directory, add explicit <a href="file.json"> links in index.html or use Import.
-  - Builder autosaves to localStorage under prefix "pf_level_autosave".
-  - Saved named levels use localStorage key "pf_level_<name>".
-  - Touch controls appear automatically on touch devices when not in menu.
+/* ---------- End of file ----------
+  Notes:
+  - v6.2 addresses builder activation bug: after pressing "B" the menu will auto-hide and taps will register.
+  - Export dialog now supports "Copy" and "Download .json".
+  - Everything else (no procedural tiles, autosave, import, remote scanning, touch controls) preserved.
 */
-
 </script>
 </body>
 </html>
